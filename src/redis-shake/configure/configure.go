@@ -39,6 +39,8 @@ type Configuration struct {
 	SenderSize                uint64   `config:"sender.size"`
 	SenderCount               uint     `config:"sender.count"`
 	SenderDelayChannelSize    uint     `config:"sender.delay_channel_size"`
+	KeepAlive                 uint     `config:"keep_alive"`
+	PidPath                   string   `config:"pid_path"`
 
 	// inner variables
 	ReplaceHashTag bool   `config:"replace_hash_tag"`

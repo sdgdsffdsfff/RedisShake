@@ -34,7 +34,10 @@ func OpenRedisConnWithTimeout(target, auth_type, passwd string, readTimeout, wri
 }
 
 func OpenNetConn(target, auth_type, passwd string) net.Conn {
-	c, err := net.Dial("tcp", target)
+	d := net.Dialer{
+		KeepAlive: time.Duration(conf.Options.KeepAlive) * time.Second,
+	}
+	c, err := d.Dial("tcp", target)
 	if err != nil {
 		log.PanicErrorf(err, "cannot connect to '%s'", target)
 	}
@@ -81,7 +84,6 @@ func OpenReadWriteFile(name string) *os.File {
 }
 
 func SendPSyncListeningPort(c net.Conn, port int) {
-
 	_, err := c.Write(redis.MustEncodeToBytes(redis.NewCommand("replconf", "listening-port", port)))
 	if err != nil {
 		log.PanicError(errors.Trace(err), "write replconf listening-port failed")
@@ -301,15 +303,16 @@ func restoreQuicklistEntry(c redigo.Conn, e *rdb.BinEntry) {
 	if err != nil {
 		log.PanicError(err, "read rdb ")
 	}
-	//log.Info("restore quicklist key: ", string(e.Key), ", type: ", t)
+	// log.Info("restore quicklist key: ", string(e.Key), ", type: ", e.Type)
 
 	count := 0
 	if n, err := r.ReadLength(); err != nil {
 		log.PanicError(err, "read rdb ")
 	} else {
-		//log.Info("quicklist item size: ", int(n))
+		// log.Info("quicklist item size: ", int(n))
 		for i := 0; i < int(n); i++ {
 			ziplist, err := r.ReadString()
+			// log.Info("zipList: ", ziplist)
 			if err != nil {
 				log.PanicError(err, "read rdb ")
 			}
@@ -317,12 +320,13 @@ func restoreQuicklistEntry(c redigo.Conn, e *rdb.BinEntry) {
 			if zln, err := r.ReadZiplistLength(buf); err != nil {
 				log.PanicError(err, "read rdb")
 			} else {
-				//log.Info("ziplist one of quicklist, size: ", int(zln))
+				// log.Info("ziplist one of quicklist, size: ", int(zln))
 				for i := int64(0); i < zln; i++ {
 					entry, err := r.ReadZiplistEntry(buf)
 					if err != nil {
 						log.PanicError(err, "read rdb ")
 					}
+					// log.Info("rpush key: ", e.Key, " value: ", entry)
 					count++
 					c.Send("RPUSH", e.Key, entry)
 					if count == 100 {
@@ -674,7 +678,18 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 		return
 	}
 
-	if uint64(len(e.Value)) > conf.Options.BigKeyThreshold || e.RealMemberCount != 0 {
+	// load lua script
+	if e.Type == rdb.RdbFlagAUX && string(e.Key) == "lua" {
+		_, err := c.Do("script", "load", e.Value)
+		if err != nil {
+			log.Panicf(err.Error())
+		}
+		return
+	}
+
+	// TODO, need to judge big key
+	if e.Type != rdb.RDBTypeStreamListPacks &&
+			(uint64(len(e.Value)) > conf.Options.BigKeyThreshold || e.RealMemberCount != 0) {
 		//use command
 		if conf.Options.Rewrite && e.NeedReadLen == 1 {
 			if !conf.Options.Metric {
@@ -694,11 +709,23 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 		}
 		return
 	}
-	s, err := redigo.String(c.Do("restore", e.Key, ttlms, e.Value))
+
+	params := []interface{}{e.Key, ttlms, e.Value}
+	if e.IdleTime != 0 {
+		params = append(params, "IDLETIME")
+		params = append(params, e.IdleTime)
+	}
+	if e.Freq != 0 {
+		params = append(params, "FREQ")
+		params = append(params, e.Freq)
+	}
+	// fmt.Printf("key: %v, value: %v params: %v\n", string(e.Key), e.Value, params)
+	s, err := redigo.String(c.Do("restore", params...))
 	if err != nil {
 		/*The reply value of busykey in 2.8 kernel is "target key name is busy",
 		  but in 4.0 kernel is "BUSYKEY Target key name already exists"*/
-		if strings.Contains(err.Error(), "Target key name is busy") || strings.Contains(err.Error(), "BUSYKEY Target key name already exists") {
+		if strings.Contains(err.Error(), "Target key name is busy") ||
+			strings.Contains(err.Error(), "BUSYKEY Target key name already exists") {
 			if conf.Options.Rewrite {
 				if !conf.Options.Metric {
 					log.Infof("warning, rewrite key: %v", string(e.Key))
@@ -706,10 +733,11 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 				var s2 string
 				var rerr error
 				if conf.Options.TargetReplace {
-					s2, rerr = redigo.String(c.Do("restore", e.Key, ttlms, e.Value, "replace"))
+					params = append(params, "REPLACE")
+					s2, rerr = redigo.String(c.Do("restore", params...))
 				} else {
 					_, _ = redigo.String(c.Do("del", e.Key))
-					s2, rerr = redigo.String(c.Do("restore", e.Key, ttlms, e.Value))
+					s2, rerr = redigo.String(c.Do("restore", params...))
 				}
 				if rerr != nil {
 					log.Info(s2, rerr, "key ", string(e.Key))
