@@ -6,9 +6,11 @@ package utils
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
@@ -21,33 +23,71 @@ import (
 	"pkg/libs/stats"
 	"pkg/rdb"
 	"pkg/redis"
-	redigo "github.com/garyburd/redigo/redis"
 	"redis-shake/configure"
+
+	"github.com/FZambia/go-sentinel"
+	redigo "github.com/garyburd/redigo/redis"
+	redigoCluster "github.com/vinllen/redis-go-cluster"
 )
 
-func OpenRedisConn(target, auth_type, passwd string) redigo.Conn {
-	return redigo.NewConn(OpenNetConn(target, auth_type, passwd), 0, 0)
+func OpenRedisConn(target []string, auth_type, passwd string, isCluster bool, tlsEnable bool) redigo.Conn {
+	return OpenRedisConnWithTimeout(target, auth_type, passwd, 0, 0, isCluster, tlsEnable)
 }
 
-func OpenRedisConnWithTimeout(target, auth_type, passwd string, readTimeout, writeTimeout time.Duration) redigo.Conn {
-	return redigo.NewConn(OpenNetConn(target, auth_type, passwd), readTimeout, writeTimeout)
+func OpenRedisConnWithTimeout(target []string, auth_type, passwd string, readTimeout, writeTimeout time.Duration,
+		isCluster bool, tlsEnable bool) redigo.Conn {
+	// return redigo.NewConn(OpenNetConn(target, auth_type, passwd), readTimeout, writeTimeout)
+	if isCluster {
+		cluster, err := redigoCluster.NewCluster(
+			&redigoCluster.Options{
+				StartNodes:   target,
+				ConnTimeout:  1 * time.Second,
+				ReadTimeout:  readTimeout,
+				WriteTimeout: writeTimeout,
+				KeepAlive:    16,
+				AliveTime:    60 * time.Second,
+				Password:     passwd,
+			})
+		if err != nil {
+			log.Panicf("create cluster connection error[%v]", err)
+			return nil
+		}
+		return NewClusterConn(cluster, 4096)
+	} else {
+		// tls only support single connection currently
+		return redigo.NewConn(OpenNetConn(target[0], auth_type, passwd, tlsEnable), readTimeout, writeTimeout)
+	}
 }
 
-func OpenNetConn(target, auth_type, passwd string) net.Conn {
-	d := net.Dialer{
+func OpenNetConn(target, auth_type, passwd string, tlsEnable bool) net.Conn {
+	d := &net.Dialer{
 		KeepAlive: time.Duration(conf.Options.KeepAlive) * time.Second,
 	}
-	c, err := d.Dial("tcp", target)
+	var c net.Conn
+	var err error
+	if tlsEnable {
+		c, err = tls.DialWithDialer(d, "tcp", target, &tls.Config{InsecureSkipVerify: false})
+	} else {
+		c, err = d.Dial("tcp", target)
+	}
 	if err != nil {
 		log.PanicErrorf(err, "cannot connect to '%s'", target)
 	}
 
+	// log.Infof("try to auth address[%v] with type[%v]", target, auth_type)
 	AuthPassword(c, auth_type, passwd)
+	// log.Info("auth OK!")
 	return c
 }
 
-func OpenNetConnSoft(target, auth_type, passwd string) net.Conn {
-	c, err := net.Dial("tcp", target)
+func OpenNetConnSoft(target, auth_type, passwd string, tlsEnable bool) net.Conn {
+	var c net.Conn
+	var err error
+	if tlsEnable {
+		c, err = tls.Dial("tcp", target, &tls.Config{InsecureSkipVerify: false})
+	} else {
+		c, err = net.Dial("tcp", target)
+	}
 	if err != nil {
 		return nil
 	}
@@ -88,17 +128,19 @@ func SendPSyncListeningPort(c net.Conn, port int) {
 	if err != nil {
 		log.PanicError(errors.Trace(err), "write replconf listening-port failed")
 	}
-	var b = make([]byte, 5)
-	if _, err := io.ReadFull(c, b); err != nil {
+
+	ret, err := ReadRESPEnd(c)
+	if err != nil {
 		log.PanicError(errors.Trace(err), "read auth response failed")
 	}
-	if strings.ToUpper(string(b)) != "+OK\r\n" {
-		log.Panic("repl listening-port failed: ", string(b))
+	if strings.ToUpper(ret) != "+OK\r\n" {
+		log.Panicf("repl listening-port failed[%v]", RemoveRESPEnd(ret))
 	}
 }
 
 func AuthPassword(c net.Conn, auth_type, passwd string) {
 	if passwd == "" {
+		log.Infof("input password is empty, skip auth address[%v] with type[%v].", c.RemoteAddr(), auth_type)
 		return
 	}
 
@@ -106,25 +148,28 @@ func AuthPassword(c net.Conn, auth_type, passwd string) {
 	if err != nil {
 		log.PanicError(errors.Trace(err), "write auth command failed")
 	}
-	var b = make([]byte, 5)
-	if _, err := io.ReadFull(c, b); err != nil {
+
+	ret, err := ReadRESPEnd(c)
+	if err != nil {
 		log.PanicError(errors.Trace(err), "read auth response failed")
 	}
-	if strings.ToUpper(string(b)) != "+OK\r\n" {
-		log.Panicf("auth failed[%s]", string(b))
+	if strings.ToUpper(ret) != "+OK\r\n" {
+		log.Panicf("auth failed[%v]", RemoveRESPEnd(ret))
 	}
 }
 
-func OpenSyncConn(target string, auth_type, passwd string) (net.Conn, <-chan int64) {
-	c := OpenNetConn(target, auth_type, passwd)
+func OpenSyncConn(target string, auth_type, passwd string, tlsEnable bool) (net.Conn, <-chan int64) {
+	c := OpenNetConn(target, auth_type, passwd, tlsEnable)
 	if _, err := c.Write(redis.MustEncodeToBytes(redis.NewCommand("sync"))); err != nil {
 		log.PanicError(errors.Trace(err), "write sync command failed")
 	}
 	return c, waitRdbDump(c)
 }
 
+// pipeline mode which means we don't wait all dump finish and run the next step
 func waitRdbDump(r io.Reader) <-chan int64 {
 	size := make(chan int64)
+	// read rdb size
 	go func() {
 		var rsp string
 		for {
@@ -636,6 +681,14 @@ func restoreBigRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 }
 
 func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
+	/*
+	 * for ucloud, special judge.
+	 * 046110.key -> key
+	 */
+	if conf.Options.RdbSpecialCloud == UCloudCluster {
+		e.Key = e.Key[7:]
+	}
+
 	var ttlms uint64
 	if conf.Options.ReplaceHashTag {
 		e.Key = bytes.Replace(e.Key, []byte("{"), []byte(""), 1)
@@ -689,7 +742,7 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 
 	// TODO, need to judge big key
 	if e.Type != rdb.RDBTypeStreamListPacks &&
-			(uint64(len(e.Value)) > conf.Options.BigKeyThreshold || e.RealMemberCount != 0) {
+		(uint64(len(e.Value)) > conf.Options.BigKeyThreshold || e.RealMemberCount != 0) {
 		//use command
 		if conf.Options.Rewrite && e.NeedReadLen == 1 {
 			if !conf.Options.Metric {
@@ -720,7 +773,8 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 		params = append(params, e.Freq)
 	}
 	// fmt.Printf("key: %v, value: %v params: %v\n", string(e.Key), e.Value, params)
-	s, err := redigo.String(c.Do("restore", params...))
+	// s, err := redigo.String(c.Do("restore", params...))
+	s, err := redigoCluster.String(c.Do("restore", params...))
 	if err != nil {
 		/*The reply value of busykey in 2.8 kernel is "target key name is busy",
 		  but in 4.0 kernel is "BUSYKEY Target key name already exists"*/
@@ -746,12 +800,10 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 				log.Panicf("target key name is busy:", string(e.Key))
 			}
 		} else {
-			log.PanicError(err, "restore command error key:", string(e.Key), "err:", err.Error())
+			log.PanicError(err, "restore command error key:", string(e.Key), " err:", err.Error())
 		}
-	} else {
-		if s != "OK" {
-			log.Panicf("restore command response = '%s', should be 'OK'", s)
-		}
+	} else if s != "OK" {
+		log.Panicf("restore command response = '%s', should be 'OK'", s)
 	}
 }
 
@@ -820,8 +872,10 @@ func ParseRedisInfo(content []byte) map[string]string {
 	return result
 }
 
-func GetRedisVersion(target, authType, auth string) (string, error) {
-	c := OpenRedisConn(target, authType, auth)
+func GetRedisVersion(target, authType, auth string, tlsEnable bool) (string, error) {
+	c := OpenRedisConn([]string{target}, authType, auth, false, tlsEnable)
+	defer c.Close()
+
 	infoStr, err := redigo.Bytes(c.Do("info", "server"))
 	if err != nil {
 		return "", err
@@ -889,4 +943,63 @@ func GetLocalIp(preferdInterfaces []string) (ip string, interfaceName string, er
 		}
 	}
 	return ip, "", fmt.Errorf("fetch local ip failed, interfaces: %s", strings.Join(preferdInterfaces, ","))
+}
+
+// GetReadableRedisAddressThroughSentinel gets readable redis address
+// First, the function will pick one from available slaves randomly.
+// If there is no available slave, it will pick master.
+func GetReadableRedisAddressThroughSentinel(sentinelAddrs []string, sentinelMasterName string, fromMaster bool) (string, error) {
+	sentinelGroup := sentinel.Sentinel{
+		Addrs:      sentinelAddrs,
+		MasterName: sentinelMasterName,
+		Dial:       defaultDialFunction,
+	}
+	if fromMaster == false {
+		if slaves, err := sentinelGroup.Slaves(); err == nil {
+			if addr, err := getAvailableSlaveAddress(slaves); err == nil {
+				return addr, nil
+			} else {
+				return "", err
+			}
+		} else {
+			return "", err
+		}
+	}
+	return sentinelGroup.MasterAddr()
+}
+
+// getAvailableSlaveAddress picks a slave address randomly.
+func getAvailableSlaveAddress(slaves []*sentinel.Slave) (string, error) {
+	for {
+		length := len(slaves)
+		if length == 0 {
+			break
+		}
+		randSlaveIndex := rand.Intn(length)
+		if slave := slaves[randSlaveIndex]; slave.Available() {
+			return slave.Addr(), nil
+		}
+		slaves = append(slaves[:randSlaveIndex], slaves[randSlaveIndex+1:]...)
+	}
+	return "", fmt.Errorf("there is no available slave")
+}
+
+// getWritableRedisAddressThroughSentinel gets writable redis address
+// The function will return redis master address.
+func GetWritableRedisAddressThroughSentinel(sentinelAddrs []string, sentinelMasterName string) (string, error) {
+	sentinelGroup := sentinel.Sentinel{
+		Addrs:      sentinelAddrs,
+		MasterName: sentinelMasterName,
+		Dial:       defaultDialFunction,
+	}
+	return sentinelGroup.MasterAddr()
+}
+
+var defaultDialFunction = func(addr string) (redigo.Conn, error) {
+	timeout := 500 * time.Millisecond
+	c, err := redigo.DialTimeout("tcp", addr, timeout, timeout, timeout)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
 }

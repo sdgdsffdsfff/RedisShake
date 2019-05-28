@@ -3,6 +3,12 @@
 	"ignore": "test",
 	"package": [
 		{
+			"checksumSHA1": "hBqmLpr3P88FPgBk27hzpa5N0mM=",
+			"path": "github.com/FZambia/go-sentinel",
+			"revision": "76bd05e8e22f9f8f5e1dd6d3a85b7951da7cce57",
+			"revisionTime": "2017-12-04T08:54:13Z"
+		},
+		{
 			"checksumSHA1": "1/Kf0ihi6RtfNt0JjAtZLKvfqJY=",
 			"path": "github.com/cupcake/rdb",
 			"revision": "43ba34106c765f2111c0dc7b74cdf8ee437411e0",
@@ -13,6 +19,12 @@
 			"path": "github.com/cupcake/rdb/crc64",
 			"revision": "43ba34106c765f2111c0dc7b74cdf8ee437411e0",
 			"revisionTime": "2016-08-25T15:38:14Z"
+		},
+		{
+			"checksumSHA1": "CSPbwbyzqA6sfORicn4HFtIhF/c=",
+			"path": "github.com/davecgh/go-spew/spew",
+			"revision": "d8f796af33cc11cb798c1aaeb27a4ebc5099927d",
+			"revisionTime": "2018-08-30T19:11:22Z"
 		},
 		{
 			"checksumSHA1": "VbYBp7hfr7vdfliXjcqwrxSsMVg=",
@@ -51,10 +63,28 @@
 			"revisionTime": "2018-06-18T18:06:23Z"
 		},
 		{
+			"checksumSHA1": "LuFv4/jlrmFNnDb/5SCSEPAM9vU=",
+			"path": "github.com/pmezard/go-difflib/difflib",
+			"revision": "5d4384ee4fb2527b0a1256a821ebfc92f91efefc",
+			"revisionTime": "2018-12-26T10:54:42Z"
+		},
+		{
 			"checksumSHA1": "Tutue3nEgM/87jitUcYv6ODwyNE=",
 			"path": "github.com/satori/go.uuid",
 			"revision": "b2ce2384e17bbe0c6d34077efa39dbab3e09123b",
 			"revisionTime": "2018-10-28T12:50:25Z"
+		},
+		{
+			"checksumSHA1": "IIsn0Wdi5rHU8xca+FzDd+YeYlc=",
+			"path": "github.com/stretchr/testify/assert",
+			"revision": "34c6fa2dc70986bccbbffcc6130f6920a924b075",
+			"revisionTime": "2019-03-04T09:57:49Z"
+		},
+		{
+			"checksumSHA1": "uma2AeftGc7LC/UB0QY2JSnxl3w=",
+			"path": "github.com/vinllen/redis-go-cluster",
+			"revision": "b6031aad42dc289f4696f835b2fe6dc0da49c8ee",
+			"revisionTime": "2019-05-25T06:57:32Z"
 		},
 		{
 			"checksumSHA1": "TM3Neoy1xRAKyZYMGzKc41sDFW4=",
@@ -62,5 +92,6 @@
 			"revision": "a96e63847dc3c67d17befa69c303767e2f84e54f",
 			"revisionTime": "2017-05-31T16:03:50Z"
 		}
-	]
+	],
+	"rootPath": "/Users/vinllen-ali/code/redis-shake-inner/redis-shake/src"
 }
