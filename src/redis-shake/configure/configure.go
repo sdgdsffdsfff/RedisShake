@@ -23,7 +23,7 @@ type Configuration struct {
 	TargetPasswordRaw         string   `config:"target.password_raw"`
 	TargetPasswordEncoding    string   `config:"target.password_encoding"`
 	TargetVersion             uint     `config:"target.version"`
-	TargetDB                  int      `config:"target.db"`
+	TargetDBString            string   `config:"target.db"`
 	TargetAuthType            string   `config:"target.auth_type"`
 	TargetType                string   `config:"target.type"`
 	TargetTLSEnable           bool     `config:"target.tls_enable"`
@@ -33,9 +33,12 @@ type Configuration struct {
 	RdbSpecialCloud           string   `config:"rdb.special_cloud"`
 	FakeTime                  string   `config:"fake_time"`
 	Rewrite                   bool     `config:"rewrite"`
-	FilterDB                  string   `config:"filter.db"`
-	FilterKey                 []string `config:"filter.key"`
+	FilterDBWhitelist         []string `config:"filter.db.whitelist"`
+	FilterDBBlacklist         []string `config:"filter.db.blacklist"`
+	FilterKeyWhitelist        []string `config:"filter.key.whitelist"`
+	FilterKeyBlacklist        []string `config:"filter.key.blacklist"`
 	FilterSlot                []string `config:"filter.slot"`
+	FilterLua                 bool     `config:"filter.lua"`
 	BigKeyThreshold           uint64   `config:"big_key_threshold"`
 	Psync                     bool     `config:"psync"`
 	Metric                    bool     `config:"metric"`
@@ -52,12 +55,15 @@ type Configuration struct {
 	ScanKeyNumber             uint32   `config:"scan.key_number"`
 	ScanSpecialCloud          string   `config:"scan.special_cloud"`
 	ScanKeyFile               string   `config:"scan.key_file"`
+	Qps                       int      `config:"qps"`
 
 	// inner variables
-	ReplaceHashTag bool   `config:"replace_hash_tag"`
-	ExtraInfo      bool   `config:"extra"`
-	SockFileName   string `config:"sock.file_name"`
-	SockFileSize   uint   `config:"sock.file_size"`
+	ReplaceHashTag bool     `config:"replace_hash_tag"`
+	ExtraInfo      bool     `config:"extra"`
+	SockFileName   string   `config:"sock.file_name"`
+	SockFileSize   uint     `config:"sock.file_size"`
+	FilterKey      []string `config:"filter.key"` // compatible with older versions
+	FilterDB       string   `config:"filter.db"`  // compatible with older versions
 
 	/*---------------------------------------------------------*/
 	// generated variables
@@ -67,6 +73,8 @@ type Configuration struct {
 	ShiftTime          time.Duration // shift
 	TargetRedisVersion string        // to_redis_version
 	TargetReplace      bool          // to_replace
+	TargetDB           int           // int type
+	Version            string        // version
 }
 
 var Options Configuration

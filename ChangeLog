@@ -1,3 +1,54 @@
+2019-07-24 Alibaba Cloud.
+	* VERSION: 1.6.13
+	* IMPROVE: support `filter.db.whitelist` and `filter.db.blacklist` to let
+	different db syncing to db0 even when target type is cluster. see #127.
+	* BUGFIX: fix bug of connection url in automatic discovery in cluster. see
+	#124.
+	* IMPROVE: support `target.db` in rump mode.
+	* IMPROVE: add debug log in RDB syncing.
+2019-07-11 Alibaba Cloud.
+	* VERSION: 1.6.12
+	* IMPROVE: support filter key with whitelist and blacklist.
+	* IMPROVE: support filter db with whitelist and blacklist.
+	* BUGFIX: fix "bypass" count in metric.
+2019-07-04 Alibaba Cloud.
+	* VERSION: 1.6.11
+	* BUGFIX: adapt "redis-go-cluster" driver to fix bug of big key syncing
+	block in `sync` mode. See #114
+2019-07-03 Alibaba Cloud.
+	* VERSION: 1.6.10
+	* IMPROVE: support print Lua in `decode` mode.
+	* BUGFIX: merge metric panic PR#111
+	* IMPROVE: check checksum and version once receiving error from the target in
+	`rump` mode.
+2019-06-21 Alibaba Cloud.
+	* VERSION: 1.6.9
+	* IMPROVE: support Lua and transaction when target is open source cluster
+	version.
+	* IMPROVE: support filter Lua: `filter.lua`
+2019-06-21 Alibaba Cloud.
+	* VERSION: 1.6.8
+	* IMPROVE: add hypervisor.
+	* IMPROVE: add key filter in `rump` mode.
+	* IMPROVE: add prometheus metrics with url: "localhost:$http_profile/metrics"
+2019-06-13 Alibaba Cloud.
+	* VERSION: 1.6.7
+	* IMPROVE: split big key in `rump` mode.
+	* IMPROVE: add rate transmission mechanism in `rump` mode.
+	* IMPROVE: add metric in `rump` mode.
+2019-06-09 Alibaba Cloud.
+	* VERSION: 1.6.6
+	* cherry-pick merge v1.4.4
+	* BUGFIX: delete single command failed when filter key given.
+2019-06-06 Alibaba Cloud.
+	* VERSION: 1.6.5
+	* IMPROVE: run rump in parallel to support several db nodes behind proxy.
+	* BUGFIX: run rump panic when the source is proxy with more than 1 db.
+2019-06-05 Alibaba Cloud.
+	* VERSION: 1.4.4
+	* BUGFIX: modify the ttl from millisecond to second in restore when
+	overpass big key threshold.
+	* IMPROVE: set some default values in configuration.
 2019-05-30 Alibaba Cloud.
 	* VERSION: 1.6.4
 	* BUGFIX: fix bug of `GetDetailedInfo` panic.

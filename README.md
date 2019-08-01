@@ -1,4 +1,4 @@
-RedisShake is mainly used to synchronize data from one redis database to another.<br>
+RedisShake is mainly used to synchronize data from one redis to another.<br>
 Thanks to the Douyu's WSD team for the support. <br>
 
 * [中文文档](https://yq.aliyun.com/articles/691794)
@@ -22,6 +22,11 @@ The type can be one of the followings:<br>
 * **rump**: Sync data from source redis to target redis by `scan` command. Only support full synchronization. Plus, RedisShake also supports fetching data from given keys in the input file when `scan` command is not supported on the source side.
 
 Please check out the `conf/redis-shake.conf` to see the detailed parameters description.<br>
+
+# Support
+---
+Redis version from 2.x to 5.0.
+Supports `Standalone`, `Cluster`, `Codis`, `Aliyun Cluster Proxy`, `Tencent Cloud Proxy` and so on.
 
 # Configuration
 Redis-shake has several parameters in the configuration(`conf/redis-shake.conf`) that maybe confusing, if this is your first time using, just configure the `source.address` and `target.address` parameters.
@@ -67,7 +72,7 @@ User can use `-version` to print the version.
 
 # Usage
 ---
-You can directly download the binary in the [release package](https://github.com/alibaba/RedisShake/releases).<br>
+You can directly download the binary in the [release package](https://github.com/alibaba/RedisShake/releases), and use `start.sh` script to start it directly: `./start.sh redis-shake.conf sync`.<br>
 You can also build redis-shake yourself according to the following steps, the `go` and `govendor` must be installed before compile:
 *  git clone https://github.com/alibaba/RedisShake.git
 *  cd RedisShake
@@ -87,3 +92,10 @@ We also provide some tools for synchronization in Shake series.<br>
 
 Plus, we have a WeChat group so that users can join and discuss, but the group user number is limited. So please add my WeChat number: `vinllen_xingge` first, and I will add you to this group.<br>
 
+# Thanks
+---
+| Username | Mail |
+| :------: | :------: |
+| ceshihao | davidzheng23@gmail.com |
+| wangyiyang | wangyiyang.kk@gmail.com |
+| muicoder | muicoder@gmail.com |

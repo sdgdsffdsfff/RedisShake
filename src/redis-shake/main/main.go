@@ -51,7 +51,12 @@ func main() {
 	version := flag.Bool("version", false, "show version")
 	flag.Parse()
 
-	if *configuration == "" || *tp == "" || *version {
+	if *version {
+		fmt.Println(utils.Version)
+		return
+	}
+
+	if *configuration == "" || *tp == "" {
 		if !*version {
 			fmt.Println("Please show me the '-conf' and '-type'")
 		}
@@ -59,6 +64,8 @@ func main() {
 		flag.PrintDefaults()
 		return
 	}
+
+	conf.Options.Version = utils.Version
 
 	var file *os.File
 	if file, err = os.Open(*configuration); err != nil {
@@ -181,8 +188,11 @@ func sanitizeOptions(tp string) error {
 		conf.Options.Parallel = int(math.Max(float64(conf.Options.Parallel), float64(conf.Options.NCpu)))
 	}
 
-	if conf.Options.BigKeyThreshold > 524288000 {
-		return fmt.Errorf("BigKeyThreshold[%v] should <= 524288000", conf.Options.BigKeyThreshold)
+	// 500 M
+	if conf.Options.BigKeyThreshold > 500 * utils.MB {
+		return fmt.Errorf("BigKeyThreshold[%v] should <= 500 MB", conf.Options.BigKeyThreshold)
+	} else if conf.Options.BigKeyThreshold == 0 {
+		conf.Options.BigKeyThreshold = 50 * utils.MB
 	}
 
 	// source password
@@ -256,6 +266,8 @@ func sanitizeOptions(tp string) error {
 		fallthrough
 	case utils.LogLevelInfo:
 		logDeepLevel = log.LEVEL_INFO
+	case utils.LogLevelDebug:
+		fallthrough
 	case utils.LogLevelAll:
 		logDeepLevel = log.LEVEL_DEBUG
 	default:
@@ -266,7 +278,10 @@ func sanitizeOptions(tp string) error {
 	// heartbeat, 86400 = 1 day
 	if conf.Options.HeartbeatInterval > 86400 {
 		return fmt.Errorf("HeartbeatInterval[%v] should in [0, 86400]", conf.Options.HeartbeatInterval)
+	} else if conf.Options.HeartbeatInterval == 0 {
+		conf.Options.HeartbeatInterval = 10
 	}
+
 	if conf.Options.HeartbeatNetworkInterface == "" {
 		conf.Options.HeartbeatIp = "127.0.0.1"
 	} else {
@@ -300,21 +315,17 @@ func sanitizeOptions(tp string) error {
 	}
 
 	if conf.Options.FilterDB != "" {
-		if n, err := strconv.ParseInt(conf.Options.FilterDB, 10, 32); err != nil {
-			return fmt.Errorf("parse FilterDB failed[%v]", err)
-		} else {
-			base.AcceptDB = func(db uint32) bool {
-				return db == uint32(n)
-			}
-		}
+		conf.Options.FilterDBWhitelist = []string{conf.Options.FilterDB}
+	}
+	if len(conf.Options.FilterDBWhitelist) != 0 && len(conf.Options.FilterDBBlacklist) != 0 {
+		return fmt.Errorf("only one of 'filter.db.whitelist' and 'filter.db.blacklist' can be given")
 	}
 
-	// if the target is "cluster", only allow pass db 0
-	if conf.Options.TargetType == conf.RedisTypeCluster {
-		base.AcceptDB = func(db uint32) bool {
-			return db == 0
-		}
-		log.Info("the target redis type is cluster, only pass db0")
+	if len(conf.Options.FilterKey) != 0 {
+		conf.Options.FilterKeyWhitelist = conf.Options.FilterKey
+	}
+	if len(conf.Options.FilterKeyWhitelist) != 0 && len(conf.Options.FilterKeyBlacklist) != 0 {
+		return fmt.Errorf("only one of 'filter.key.whitelist' and 'filter.key.blacklist' can be given")
 	}
 
 	if len(conf.Options.FilterSlot) > 0 {
@@ -325,8 +336,28 @@ func sanitizeOptions(tp string) error {
 		}
 	}
 
-	if conf.Options.TargetDB >= 0 {
-		// pass, >= 0 means enable
+	if conf.Options.TargetDBString == "" {
+		conf.Options.TargetDB = -1
+	} else if v, err := strconv.Atoi(conf.Options.TargetDBString); err != nil {
+		return fmt.Errorf("parse target.db[%v] failed[%v]", conf.Options.TargetDBString, err)
+	} else if v < 0 {
+		conf.Options.TargetDB = -1
+	} else {
+		conf.Options.TargetDB = v
+	}
+
+	// if the target is "cluster", only allow pass db 0
+	if conf.Options.TargetType == conf.RedisTypeCluster {
+		if conf.Options.TargetDB == -1 {
+			conf.Options.FilterDBWhitelist = []string{"0"} // set whitelist = 0
+			conf.Options.FilterDBBlacklist = []string{}    // reset blacklist
+			log.Info("the target redis type is cluster, only pass db0")
+		} else if conf.Options.TargetDB == 0 {
+			log.Info("the target redis type is cluster, all db syncing to db0")
+		} else {
+			// > 0
+			return fmt.Errorf("target.db[%v] should in {-1, 0} when target type is cluster", conf.Options.TargetDB)
+		}
 	}
 
 	if conf.Options.HttpProfile < 0 || conf.Options.HttpProfile > 65535 {
@@ -357,7 +388,18 @@ func sanitizeOptions(tp string) error {
 		conf.Options.SenderCount = defaultSenderCount
 	}
 
-	if tp == conf.TypeRestore || tp == conf.TypeSync {
+	if conf.Options.SenderDelayChannelSize == 0 {
+		conf.Options.SenderDelayChannelSize = 32
+	}
+
+	// [0, 100 million]
+	if conf.Options.Qps < 0 || conf.Options.Qps >= 100000000 {
+		return fmt.Errorf("qps[%v] should in (0, 100000000]", conf.Options.Qps)
+	} else if conf.Options.Qps == 0 {
+		conf.Options.Qps = 500000
+	}
+
+	if tp == conf.TypeRestore || tp == conf.TypeSync || tp == conf.TypeRump {
 		// get target redis version and set TargetReplace.
 		for _, address := range conf.Options.TargetAddressList {
 			// single connection even if the target is cluster
@@ -390,14 +432,13 @@ func sanitizeOptions(tp string) error {
 		}
 
 		if conf.Options.ScanSpecialCloud != "" && conf.Options.ScanKeyFile != "" {
-			return fmt.Errorf("scan.special_cloud[%v] and scan.key_file[%v] cann't be given at the same time",
+			return fmt.Errorf("scan.special_cloud[%v] and scan.key_file[%v] can't all be given at the same time",
 				conf.Options.ScanSpecialCloud, conf.Options.ScanKeyFile)
 		}
 
-		if (conf.Options.ScanSpecialCloud != "" || conf.Options.ScanKeyFile != "") && len(conf.Options.SourceAddressList) > 1 {
-			return fmt.Errorf("source address should <= 1 when scan.special_cloud[%v] or scan.key_file[%v] given",
-				conf.Options.ScanSpecialCloud, conf.Options.ScanKeyFile)
-		}
+		//if len(conf.Options.SourceAddressList) == 1 {
+		//	return fmt.Errorf("source address length should == 1 when type is 'rump'")
+		//}
 	}
 
 	return nil

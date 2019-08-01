@@ -19,6 +19,7 @@ import (
 	"redis-shake/base"
 	"redis-shake/common"
 	"redis-shake/configure"
+	"redis-shake/filter"
 )
 
 type CmdRestore struct {
@@ -137,9 +138,8 @@ func (dr *dbRestorer) restore() {
 	}
 }
 
-
 func (dr *dbRestorer) restoreRDBFile(reader *bufio.Reader, target []string, auth_type, passwd string, nsize int64,
-		tlsEnable bool) {
+	tlsEnable bool) {
 	pipe := utils.NewRDBLoader(reader, &dr.rbytes, base.RDBPipeSize)
 	wait := make(chan struct{})
 	go func() {
@@ -153,10 +153,14 @@ func (dr *dbRestorer) restoreRDBFile(reader *bufio.Reader, target []string, auth
 				defer c.Close()
 				var lastdb uint32 = 0
 				for e := range pipe {
-					if !base.AcceptDB(e.DB) {
+					if filter.FilterDB(int(e.DB)) {
+						// filter db
 						dr.ignore.Incr()
 					} else {
 						dr.nentry.Incr()
+
+						log.Debugf("routine[%v] try restore key[%s] with value length[%v]", dr.id, e.Key, len(e.Value))
+
 						if conf.Options.TargetDB != -1 {
 							if conf.Options.TargetDB != int(lastdb) {
 								lastdb = uint32(conf.Options.TargetDB)
@@ -168,7 +172,15 @@ func (dr *dbRestorer) restoreRDBFile(reader *bufio.Reader, target []string, auth
 								utils.SelectDB(c, lastdb)
 							}
 						}
+
+						if filter.FilterKey(string(e.Key)) {
+							continue
+						}
+
+						log.Debugf("routine[%v] start restoring key[%s] with value length[%v]", dr.id, e.Key, len(e.Value))
+
 						utils.RestoreRdbEntry(c, e)
+						log.Debugf("routine[%v] restore key[%s] ok", dr.id, e.Key)
 					}
 				}
 			}()
@@ -231,7 +243,7 @@ func (dr *dbRestorer) restoreCommand(reader *bufio.Reader, target []string, auth
 					if err != nil {
 						log.PanicErrorf(err, "routine[%v] parse db = %s failed", dr.id, s)
 					}
-					bypass = !base.AcceptDB(uint32(n))
+					bypass = filter.FilterDB(n)
 				}
 				if bypass {
 					dr.nbypass.Incr()

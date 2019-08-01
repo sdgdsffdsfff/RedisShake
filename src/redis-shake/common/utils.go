@@ -35,7 +35,7 @@ func OpenRedisConn(target []string, auth_type, passwd string, isCluster bool, tl
 }
 
 func OpenRedisConnWithTimeout(target []string, auth_type, passwd string, readTimeout, writeTimeout time.Duration,
-		isCluster bool, tlsEnable bool) redigo.Conn {
+	isCluster bool, tlsEnable bool) redigo.Conn {
 	// return redigo.NewConn(OpenNetConn(target, auth_type, passwd), readTimeout, writeTimeout)
 	if isCluster {
 		cluster, err := redigoCluster.NewCluster(
@@ -332,6 +332,9 @@ func set(c redigo.Conn, key []byte, value []byte) {
 }
 
 func flushAndCheckReply(c redigo.Conn, count int) {
+	// for redis-go-cluster driver, "Receive" function returns all the replies once flushed.
+	// However, this action is different with redigo driver that "Receive" only returns 1
+	// reply each time.
 	c.Flush()
 	for j := 0; j < count; j++ {
 		_, err := c.Receive()
@@ -723,7 +726,7 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 		}
 		restoreQuicklistEntry(c, e)
 		if e.ExpireAt != 0 {
-			r, err := redigo.Int64(c.Do("expire", e.Key, ttlms))
+			r, err := redigo.Int64(c.Do("pexpire", e.Key, ttlms))
 			if err != nil && r != 1 {
 				log.Panicf("expire ", string(e.Key), err)
 			}
@@ -733,9 +736,11 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 
 	// load lua script
 	if e.Type == rdb.RdbFlagAUX && string(e.Key) == "lua" {
-		_, err := c.Do("script", "load", e.Value)
-		if err != nil {
-			log.Panicf(err.Error())
+		if conf.Options.FilterLua == false {
+			_, err := c.Do("script", "load", e.Value)
+			if err != nil {
+				log.Panicf(err.Error())
+			}
 		}
 		return
 	}
@@ -755,7 +760,7 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 		}
 		restoreBigRdbEntry(c, e)
 		if e.ExpireAt != 0 {
-			r, err := redigo.Int64(c.Do("expire", e.Key, ttlms))
+			r, err := redigo.Int64(c.Do("pexpire", e.Key, ttlms))
 			if err != nil && r != 1 {
 				log.Panicf("expire ", string(e.Key), err)
 			}
