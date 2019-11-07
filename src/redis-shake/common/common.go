@@ -14,6 +14,7 @@ import (
 
 	logRotate "gopkg.in/natefinch/lumberjack.v2"
 	"github.com/cupcake/rdb/crc64"
+	"strconv"
 )
 
 const (
@@ -32,6 +33,9 @@ const (
 	TencentCluster = "tencent_cluster"
 	AliyunCluster  = "aliyun_cluster"
 	UCloudCluster  = "ucloud_cluster"
+	CodisCluster   = "codis_cluster"
+
+	CoidsErrMsg = "ERR backend server 'server' not found"
 )
 
 var (
@@ -89,11 +93,12 @@ func ParseInfo(content []byte) map[string]string {
 }
 
 func GetTotalLink() int {
-	if len(conf.Options.SourceAddressList) != 0 {
+	if conf.Options.Type == conf.TypeSync || conf.Options.Type == conf.TypeRump || conf.Options.Type == conf.TypeDump {
 		return len(conf.Options.SourceAddressList)
-	} else {
-		return len(conf.Options.RdbInput)
+	} else if conf.Options.Type == conf.TypeDecode || conf.Options.Type == conf.TypeRestore {
+		return len(conf.Options.SourceRdbInput)
 	}
+	return 0
 }
 
 func PickTargetRoundRobin(n int) int {
@@ -142,4 +147,69 @@ func CheckVersionChecksum(d []byte) (uint, uint64, error) {
 	}
 
 	return rdbVersion, checksum, nil
+}
+
+func GetMetric(input int64) string {
+	switch {
+	case input > PB:
+		return fmt.Sprintf("%.3fPB", float64(input) / PB)
+	case input > TB:
+		return fmt.Sprintf("%.3fTB", float64(input) / TB)
+	case input > GB:
+		return fmt.Sprintf("%.3fGB", float64(input) / GB)
+	case input > MB:
+		return fmt.Sprintf("%.3fMB", float64(input) / MB)
+	case input > KB:
+		return fmt.Sprintf("%.3fKB", float64(input) / KB)
+	default:
+		return fmt.Sprintf("%dB", input)
+	}
+}
+
+/*
+ * compare the version with given level. e.g.,
+ * 2.0.1, 2.0.3, level = 2 => equal: 0
+ * 2.0.1, 2.0.3, level = 3 => smaller: 1
+ * 3.1.1, 2.1 level = 2 => bigger: 2
+ * 3, 3.2, level = 2 => smaller: 1
+ * 3.a, 3.2, level = 2 => unknown: 3
+ */
+func CompareVersion(a, b string, level int) int {
+	if level <= 0 {
+		return 0
+	}
+
+	var err error
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	for l := 0; l < level; l++ {
+		var av, bv int
+		// parse av
+		if l > len(as) {
+			av = 0
+		} else {
+			av, err = strconv.Atoi(as[l])
+			if err != nil {
+				return 3
+			}
+		}
+
+		// parse bv
+		if l > len(bs) {
+			bv = 0
+		} else {
+			bv, err = strconv.Atoi(bs[l])
+			if err != nil {
+				return 3
+			}
+		}
+
+		if av > bv {
+			return 2
+		} else if av < bv {
+			return 1
+		}
+	}
+
+	return 0
 }

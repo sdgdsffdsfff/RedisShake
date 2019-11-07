@@ -678,8 +678,42 @@ func restoreBigRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 			}
 		}
 		log.Info("complete restore big hash key: ", string(e.Key), " field:", n)
+	case rdb.RdbTypeQuicklist:
+		if n, err := r.ReadLength(); err != nil {
+			log.PanicError(err, "read rdb ")
+		} else {
+			log.Info("quicklist item size: ", int(n))
+			for i := 0; i < int(n); i++ {
+				ziplist, err := r.ReadString()
+				log.Info("zipList: ", ziplist)
+				if err != nil {
+					log.PanicError(err, "read rdb ")
+				}
+				buf := rdb.NewSliceBuffer(ziplist)
+				if zln, err := r.ReadZiplistLength(buf); err != nil {
+					log.PanicError(err, "read rdb")
+				} else {
+					log.Info("ziplist one of quicklist, size: ", int(zln))
+					for i := int64(0); i < zln; i++ {
+						entry, err := r.ReadZiplistEntry(buf)
+						if err != nil {
+							log.PanicError(err, "read rdb ")
+						}
+						log.Info("rpush key: ", e.Key, " value: ", entry)
+						count++
+						c.Send("RPUSH", e.Key, entry)
+						if count == 100 {
+							flushAndCheckReply(c, count)
+							count = 0
+						}
+					}
+					flushAndCheckReply(c, count)
+					count = 0
+				}
+			}
+		}
 	default:
-		log.PanicError(fmt.Errorf("cann't deal rdb type:%d", t), "restore big key fail")
+		log.PanicError(fmt.Errorf("can't deal rdb type:%d", t), "restore big key fail")
 	}
 }
 
@@ -688,7 +722,7 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 	 * for ucloud, special judge.
 	 * 046110.key -> key
 	 */
-	if conf.Options.RdbSpecialCloud == UCloudCluster {
+	if conf.Options.SourceRdbSpecialCloud == UCloudCluster {
 		e.Key = e.Key[7:]
 	}
 
@@ -777,6 +811,8 @@ func RestoreRdbEntry(c redigo.Conn, e *rdb.BinEntry) {
 		params = append(params, "FREQ")
 		params = append(params, e.Freq)
 	}
+
+	log.Debugf("restore key[%s] with params[%v]", e.Key, params)
 	// fmt.Printf("key: %v, value: %v params: %v\n", string(e.Key), e.Value, params)
 	// s, err := redigo.String(c.Do("restore", params...))
 	s, err := redigoCluster.String(c.Do("restore", params...))
@@ -864,33 +900,43 @@ func NewRDBLoader(reader *bufio.Reader, rbytes *atomic2.Int64, size int) chan *r
 	return pipe
 }
 
-func ParseRedisInfo(content []byte) map[string]string {
-	result := make(map[string]string, 10)
-	lines := bytes.Split(content, []byte("\r\n"))
-	for i := 0; i < len(lines); i++ {
-		items := bytes.SplitN(lines[i], []byte(":"), 2)
-		if len(items) != 2 {
-			continue
-		}
-		result[string(items[0])] = string(items[1])
-	}
-	return result
-}
-
 func GetRedisVersion(target, authType, auth string, tlsEnable bool) (string, error) {
 	c := OpenRedisConn([]string{target}, authType, auth, false, tlsEnable)
 	defer c.Close()
 
 	infoStr, err := redigo.Bytes(c.Do("info", "server"))
 	if err != nil {
-		return "", err
+		if err.Error() == CoidsErrMsg {
+			// "info xxx" command is disable in codis, try to use "info" and parse "xxx"
+			infoStr, err = redigo.Bytes(c.Do("info"))
+			infoStr = CutRedisInfoSegment(infoStr, "server")
+		} else {
+			return "", err
+		}
 	}
+
 	infoKV := ParseRedisInfo(infoStr)
 	if value, ok := infoKV["redis_version"]; ok {
 		return value, nil
 	} else {
 		return "", fmt.Errorf("MissingRedisVersionInInfo")
 	}
+}
+
+func GetRDBChecksum(target, authType, auth string, tlsEnable bool) (string, error) {
+	c := OpenRedisConn([]string{target}, authType, auth, false, tlsEnable)
+	defer c.Close()
+
+	content, err := c.Do("config", "get", "rdbchecksum")
+	if err != nil {
+		return "", err
+	}
+
+	conentList := content.([]interface{})
+	if len(conentList) != 2 {
+		return "", fmt.Errorf("return length != 2, return: %v", conentList)
+	}
+	return string(conentList[1].([]byte)), nil
 }
 
 func CheckHandleNetError(err error) bool {

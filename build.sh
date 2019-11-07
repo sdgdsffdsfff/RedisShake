@@ -39,12 +39,21 @@ info=$info","$t
 
 echo "[ BUILD RELEASE ]"
 run_builder='go build -v'
-$run_builder -ldflags "-X $info" -o "${output}/redis-shake" "./src/redis-shake/main/main.go"
-echo "build successfully!"
+
+goos=(linux darwin windows)
+for g in "${goos[@]}"; do
+    export GOOS=$g
+    echo "try build goos=$g"
+    $run_builder -ldflags "-X $info" -o "${output}/redis-shake.$g" "./src/redis-shake/main/main.go"
+    echo "build $g successfully!"
+done
 
 # copy scripts
 cp scripts/start.sh ${output}/
 cp scripts/stop.sh ${output}/
+cp scripts/run_direct.py ${output}/
+#cp -r tools ${output}/
+#cp -r test ${output}/
 
 if [ "Linux" == "$(uname -s)" ];then
 	# hypervisor

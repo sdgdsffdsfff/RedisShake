@@ -50,9 +50,9 @@ func parseAddress(tp, address, redisType string, isSource bool) error {
 	case "":
 		fallthrough
 	case conf.RedisTypeStandalone:
-		if addressLen != 1 {
+		/*if addressLen != 1 {
 			return fmt.Errorf("redis type[%v] address[%v] length[%v] != 1", redisType, address, addressLen)
-		}
+		}*/
 		setAddressList(isSource, address)
 	case conf.RedisTypeSentinel:
 		arr := strings.Split(address, AddressSplitter)
@@ -96,9 +96,9 @@ func parseAddress(tp, address, redisType string, isSource bool) error {
 			}
 		}
 	case conf.RedisTypeCluster:
-		if isSource == false && tp == conf.TypeRump {
-			return fmt.Errorf("target type[%v] can't be cluster when type is 'rump' currently", redisType)
-		}
+		//if isSource == false && tp == conf.TypeRump {
+		//	return fmt.Errorf("target type[%v] can't be cluster when type is 'rump' currently", redisType)
+		//}
 		if strings.Contains(address, AddressSplitter) {
 			arr := strings.Split(address, AddressSplitter)
 			if len(arr) != 2 {
